@@ -1,0 +1,13 @@
+{
+  "name": "jobgrab",
+  "version": "1.0.0",
+  "description": "HK multi-board job scraper with terminal-style frontend",
+  "scripts": {
+    "dev": "vite --open",
+    "scrape": "python main.py \"software engineer\"",
+    "fresh": "python main.py \"software engineer\" && vite --open"
+  },
+  "devDependencies": {
+    "vite": "^5.2.0"
+  }
+}
