@@ -28,12 +28,13 @@ python main.py "software engineer"
 # more pages, specific sources
 python main.py "iOS developer" --pages 5 --sources linkedin,ctgoodjobs
 
-# open the frontend
-open index.html
+# open the frontend (Vite dev server with hot reload)
+npm install
+npm run dev
 ```
 
 ## Frontend features
-- Default view: all software engineering roles (C++, Java, Swift, Go, React, …)
+- Default view: all software-related roles (software developer, engineer, programmer, mobile, DevOps, …)
 - Keyword search across title + description
 - Period filter: 24h / 3 days / 1 week / 1 month
 - Source filter pills
