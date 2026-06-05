@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "description": "HK multi-board job scraper with terminal-style frontend",
   "scripts": {
-    "dev": "vite --open",
+    "dev": "concurrently -n \"API,UI\" -c \"cyan,yellow\" \"uvicorn server:app --host 127.0.0.1 --port 8000 --reload\" \"vite --open\"",
+    "ui": "vite --open",
     "scrape": "python main.py \"software engineer\"",
     "fresh": "python main.py \"software engineer\" && vite --open"
   },
   "devDependencies": {
+    "concurrently": "^8.2.2",
     "vite": "^5.2.0"
   }
 }

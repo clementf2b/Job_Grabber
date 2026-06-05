@@ -1,25 +1,16 @@
 """Michael Page HK job scraper."""
-import asyncio
 from typing import List
 from urllib.parse import urlencode
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from playwright.async_api import Page
 from .base import BaseScraper
-from .utils import strip_html
+from .utils import el_text, make_absolute
 from models import Job
-
-
-def _el_text(el: Tag | None) -> str:
-    """Strip font-awesome <i> icons then return plain text of a BS4 element."""
-    if not el:
-        return ""
-    for icon in el.find_all("i"):
-        icon.decompose()
-    return el.get_text(strip=True)
 
 
 class MichaelPageScraper(BaseScraper):
     name = "MichaelPage"
+    domains = ("www.michaelpage.com.hk", "michaelpage.com.hk")
     BASE = "https://www.michaelpage.com.hk/jobs/information-technology"
 
     async def scrape(self, page: Page) -> List[Job]:
@@ -30,8 +21,11 @@ class MichaelPageScraper(BaseScraper):
             if page_num > 0:
                 params["page"] = page_num
             url = f"{self.BASE}?{urlencode(params)}"
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(1)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.wait_for_selector("li.views-row", timeout=8000)
+            except Exception:
+                break
 
             soup = BeautifulSoup(await page.content(), "lxml")
             rows = soup.select("li.views-row")
@@ -41,25 +35,22 @@ class MichaelPageScraper(BaseScraper):
             for row in rows:
                 try:
                     title_el = row.select_one(".job-title h3 a")
-                    title = title_el.get_text(strip=True) if title_el else ""
+                    title = el_text(title_el)
                     if not title:
                         continue
 
-                    href = title_el.get("href", "") if title_el else ""
-                    if href and not href.startswith("http"):
-                        href = f"https://www.michaelpage.com.hk{href}"
-
+                    href    = make_absolute(title_el.get("href", ""), "https://www.michaelpage.com.hk")
                     desc_el = row.select_one(".job_advert__job-summary-text p")
 
                     jobs.append(Job(
                         title=title,
                         company="(via Michael Page)",
-                        location=_el_text(row.select_one(".job-location")) or self.location,
+                        location=el_text(row.select_one(".job-location")) or self.location,
                         source=self.name,
                         url=href,
-                        salary=_el_text(row.select_one(".job-salary")) or None,
-                        job_type=_el_text(row.select_one(".job-contract-type")) or None,
-                        description=strip_html(desc_el.get_text(strip=True)) if desc_el else None,
+                        salary=el_text(row.select_one(".job-salary")) or None,
+                        job_type=el_text(row.select_one(".job-contract-type")) or None,
+                        description=el_text(desc_el) or None,
                     ))
                 except Exception:
                     continue

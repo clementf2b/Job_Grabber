@@ -8,13 +8,14 @@ from .base import BaseScraper
 from .utils import UA, LINKEDIN_PERIOD, strip_html
 from models import Job
 
-# Number of reusable detail pages kept open during description fetching.
+# Reusable detail pages kept open during description fetching.
 # Low value avoids LinkedIn rate-limiting.
 DESCRIPTION_CONCURRENCY = 3
 
 
 class LinkedInScraper(BaseScraper):
     name = "LinkedIn"
+    domains = ("linkedin.com", "www.linkedin.com")
     BASE = "https://www.linkedin.com/jobs/search"
 
     async def scrape(self, page: Page) -> List[Job]:
@@ -30,7 +31,10 @@ class LinkedInScraper(BaseScraper):
             params["start"] = page_num * 25
             url = f"{self.BASE}?{urlencode(params)}"
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
+            try:
+                await page.wait_for_selector(".base-card", timeout=8000)
+            except Exception:
+                break
 
             cards = await page.query_selector_all(".base-card")
             if not cards:
@@ -59,51 +63,113 @@ class LinkedInScraper(BaseScraper):
                     continue
 
         # ── Step 2: fetch descriptions via a reusable page pool ──────────
-        # Creates DESCRIPTION_CONCURRENCY pages once and reuses them across
-        # all jobs — avoids spinning up ~96 contexts (one per job).
-        browser = page.context.browser
+        # Reuses pages from the existing browser context — no extra contexts needed.
         pool: asyncio.Queue = asyncio.Queue()
-        contexts = []
+        pool_pages = []
         for _ in range(DESCRIPTION_CONCURRENCY):
-            ctx = await browser.new_context(user_agent=UA)
-            p = await ctx.new_page()
-            contexts.append(ctx)
+            p = await page.context.new_page()
+            pool_pages.append(p)
             await pool.put(p)
 
-        async def fetch_description(job: Job) -> Optional[str]:
+        async def fetch_description(job: Job) -> None:
             if not job.url or not job.url.startswith("http"):
-                return None
+                return
             detail = await pool.get()
             try:
                 await detail.goto(job.url, wait_until="domcontentloaded", timeout=25000)
-                await asyncio.sleep(1.5)
-                # Prefer JSON-LD structured data
+                try:
+                    await detail.wait_for_selector(
+                        'script[type="application/ld+json"], .show-more-less-html__markup',
+                        timeout=6000,
+                    )
+                except Exception:
+                    pass
                 ld_el = await detail.query_selector('script[type="application/ld+json"]')
                 if ld_el:
                     data = json.loads(await ld_el.inner_text())
                     desc = strip_html(data.get("description", ""))
                     if desc:
-                        return desc[:1500]
-                # Fallback: visible description element (already plain text)
+                        job.description = desc[:1500]
+                        return
                 dom_el = await detail.query_selector(
                     ".show-more-less-html__markup, .description__text"
                 )
                 if dom_el:
-                    return (await dom_el.inner_text()).strip()[:1500]
+                    job.description = (await dom_el.inner_text()).strip()[:1500]
             except Exception:
                 pass
             finally:
-                await pool.put(detail)  # return page to pool
-            return None
+                await pool.put(detail)
 
         print(f"[LinkedIn] fetching descriptions for {len(jobs)} jobs…")
-        descriptions = await asyncio.gather(*[fetch_description(j) for j in jobs])
-        for job, desc in zip(jobs, descriptions):
-            if desc:
-                job.description = desc
+        await asyncio.gather(*[fetch_description(j) for j in jobs])
 
-        # Close the pooled contexts now that all jobs are done
-        for ctx in contexts:
-            await ctx.close()
+        for p in pool_pages:
+            await p.close()
 
         return jobs
+
+    async def _parse_detail_page(self, page: Page, url: str) -> Optional[Job]:
+        """Parse a LinkedIn job-view page and return a Job, or None on failure."""
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.wait_for_selector(
+                    'script[type="application/ld+json"], h1',
+                    timeout=8000,
+                )
+            except Exception:
+                pass
+
+            # Prefer JSON-LD structured data (most complete)
+            ld_el = await page.query_selector('script[type="application/ld+json"]')
+            if ld_el:
+                data = json.loads(await ld_el.inner_text())
+                title = data.get("title", "").strip()
+                company_raw = data.get("hiringOrganization", {})
+                company = (company_raw.get("name", "") if isinstance(company_raw, dict) else "").strip()
+
+                location_raw = data.get("jobLocation", {})
+                if isinstance(location_raw, dict):
+                    addr = location_raw.get("address", {})
+                    location = (addr.get("addressLocality") or addr.get("addressRegion") or self.location).strip()
+                else:
+                    location = self.location
+
+                salary: Optional[str] = None
+                salary_raw = data.get("baseSalary", {})
+                if isinstance(salary_raw, dict):
+                    val = salary_raw.get("value", {})
+                    if isinstance(val, dict):
+                        lo, hi, unit = val.get("minValue"), val.get("maxValue"), val.get("unitText", "")
+                        salary = (f"{lo}–{hi} {unit}" if lo and hi else f"{lo or hi} {unit}").strip() or None
+
+                description = strip_html(data.get("description", ""))[:1500] or None
+                date_posted = data.get("datePosted") or data.get("validThrough")
+                job_type = (data.get("employmentType") or "").replace("_", " ").title() or None
+
+                if title and company:
+                    return Job(title=title, company=company, location=location,
+                               source=self.name, url=url, description=description,
+                               salary=salary, job_type=job_type, posted_at=date_posted)
+
+            # Fallback: visible DOM elements
+            title_el   = await page.query_selector("h1.top-card-layout__title, h1.jobs-unified-top-card__job-title")
+            company_el = await page.query_selector("a.topcard__org-name-link, .jobs-unified-top-card__company-name")
+            desc_el    = await page.query_selector(".show-more-less-html__markup, .description__text")
+            time_el    = await page.query_selector("time")
+
+            title   = (await title_el.inner_text()).strip()    if title_el   else ""
+            company = (await company_el.inner_text()).strip()   if company_el else ""
+            desc    = (await desc_el.inner_text()).strip()[:1500] if desc_el else None
+            posted  = await time_el.get_attribute("datetime")  if time_el   else None
+
+            if title and company:
+                return Job(title=title, company=company, location=self.location,
+                           source=self.name, url=url, description=desc, posted_at=posted)
+        except Exception as e:
+            print(f"[LinkedIn] failed to scrape {url}: {e}")
+        return None
+
+    async def scrape_single(self, url: str, page: Page) -> Optional[Job]:
+        return await self._parse_detail_page(page, url)

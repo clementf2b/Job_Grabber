@@ -6,6 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
+    proxy: {
+      '/scrape-url': 'http://127.0.0.1:8000',
+      '/status':     'http://127.0.0.1:8000',
+      '/refresh':    'http://127.0.0.1:8000',
+      '/cancel':     'http://127.0.0.1:8000',
+    },
   },
   plugins: [
     {
