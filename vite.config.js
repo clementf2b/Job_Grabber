@@ -1,36 +1,26 @@
 import { defineConfig } from 'vite'
-import fs from 'fs'
-import path from 'path'
 
 export default defineConfig({
   server: {
     port: 5173,
     open: true,
     proxy: {
+      '/jobs':       'http://127.0.0.1:8000',
+      '/progress':   {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        // SSE requires streaming — disable proxy buffering
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            proxyRes.headers['cache-control'] = 'no-cache';
+            proxyRes.headers['x-accel-buffering'] = 'no';
+          });
+        },
+      },
       '/scrape-url': 'http://127.0.0.1:8000',
       '/status':     'http://127.0.0.1:8000',
       '/refresh':    'http://127.0.0.1:8000',
       '/cancel':     'http://127.0.0.1:8000',
     },
   },
-  plugins: [
-    {
-      // Serve jobs.json directly from the project root so fetch('jobs.json')
-      // works during dev. Vite's publicDir only covers the public/ folder by
-      // default; this middleware fills the gap for a single file.
-      name: 'serve-jobs-json',
-      configureServer(server) {
-        server.middlewares.use('/jobs.json', (_req, res) => {
-          const file = path.resolve(process.cwd(), 'jobs.json')
-          try {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(fs.readFileSync(file, 'utf-8'))
-          } catch {
-            res.statusCode = 404
-            res.end('[]')
-          }
-        })
-      },
-    },
-  ],
 })

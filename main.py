@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """
 JobGrab — Hong Kong multi-board job scraper.
-Usage: python main.py <keyword> [--pages N] [--period DAYS] [--sources ...] [--out jobs.json]
+Usage: python main.py <keyword> [keyword2 ...] [--pages N] [--period DAYS] [--sources ...] [--out jobs.json]
        Default: 40 pages, no time filter (captures reposted jobs)
+
+Examples:
+  python main.py "software engineer"
+  python main.py "software engineer" "quant developer" "quantitative analyst"
 
 Working sources:  linkedin, michaelpage, ctgoodjobs
 Blocked sources:  jobsdb / indeed / glassdoor (Cloudflare)
 """
 import asyncio
 import argparse
-import json
 import sys
 from typing import List
 from urllib.parse import urlparse
 
 from models import Job
 from scrapers import SCRAPERS, DOMAIN_SCRAPERS
+from db import init_db, upsert_jobs, count_jobs
 
 
 async def run_scraper(name: str, cls, keyword: str, location: str,
@@ -34,10 +38,10 @@ async def run_scraper(name: str, cls, keyword: str, location: str,
 
 async def main():
     parser = argparse.ArgumentParser(description="JobGrab — multi-board HK job scraper")
-    parser.add_argument("keyword", help="Job title / keyword to search")
+    parser.add_argument("keywords", nargs="+", help="One or more job title / keywords to search")
     parser.add_argument("--location", default="Hong Kong")
     parser.add_argument("--pages", type=int, default=40,
-                        help="Pages per source (default: 40, LinkedIn max is 40)")
+                        help="Pages per source per keyword (default: 40, LinkedIn max is 40)")
     parser.add_argument("--period", type=int, default=0,
                         help="Only include jobs posted within N days (default: 0 = no filter, captures reposts)")
     parser.add_argument("--sources", default="linkedin,michaelpage,ctgoodjobs",
@@ -49,7 +53,8 @@ async def main():
 
     selected = [s.strip().lower() for s in args.sources.split(",")]
     tasks = [
-        run_scraper(name, SCRAPERS[name], args.keyword, args.location, args.pages, args.period)
+        run_scraper(name, SCRAPERS[name], kw, args.location, args.pages, args.period)
+        for kw in args.keywords
         for name in selected if name in SCRAPERS
     ]
 
@@ -66,7 +71,7 @@ async def main():
             if not cls:
                 print(f"  ! no scraper registered for {host} — skipping {u}")
                 continue
-            scraper = cls(keyword=args.keyword, location=args.location)
+            scraper = cls(keyword=args.keywords[0], location=args.location)
             try:
                 job = await scraper.run_single(u)
             except NotImplementedError:
@@ -82,9 +87,9 @@ async def main():
     unique = list({(j.url or f"{j.title}|{j.company}"): j for j in all_jobs}.values())
 
     print(f"\nTotal unique jobs: {len(unique)}")
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump([j.to_dict() for j in unique], f, ensure_ascii=False, indent=2)
-    print(f"Saved to {args.out}")
+    init_db()
+    upsert_jobs(unique)
+    print(f"Saved to jobs.db (total in DB: {count_jobs()})")
 
     print(f"\n{'Title':<45} {'Company':<30} {'Source':<12} {'Salary'}")
     print("-" * 110)

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "HK multi-board job scraper with terminal-style frontend",
   "scripts": {
-    "dev": "concurrently -n \"API,UI\" -c \"cyan,yellow\" \"uvicorn server:app --host 127.0.0.1 --port 8000 --reload\" \"vite --open\"",
+    "kill-api": "lsof -ti :8000 | xargs kill -9 2>/dev/null; exit 0",
+    "dev": "npm run kill-api && concurrently -n \"API,UI\" -c \"cyan,yellow\" \"uvicorn server:app --host 127.0.0.1 --port 8000 --reload\" \"vite --open\"",
     "ui": "vite --open",
     "scrape": "python main.py \"software engineer\"",
     "fresh": "python main.py \"software engineer\" && vite --open"

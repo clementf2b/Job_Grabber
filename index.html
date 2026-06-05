@@ -20,7 +20,7 @@
   --amber:     #f0a500;
   --amber2:    #ffc840;
   --amber-dim: #8c6200;
-  --accent:    var(--accent);
+  --accent:    #e8a04a;
   --text:      #f0eadc;
   --text2:     #c8bfaa;
   --text3:     #a8a09c;
@@ -249,7 +249,7 @@ header {
 .pill {
   height: 34px; padding: 0 14px;
   background: transparent; border: 1px solid var(--line2);
-  border-radius: 20px; font-family: var(--font-ui);
+  border-radius: 4px; font-family: var(--font-ui);
   font-size: 10px; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; color: var(--text3); cursor: pointer;
   transition: all .18s;
@@ -386,6 +386,73 @@ body.light .pill.active { color: #fff; }
   font-family: var(--font-mono); font-size: 11px; color: var(--text3);
   letter-spacing: .02em;
 }
+
+/* ── PROGRESS PANEL ──────────────────────────────────────────── */
+.progress-panel {
+  display: none; flex-direction: column; gap: 10px;
+  padding: 14px 16px;
+  background: var(--bg2); border: 1px solid var(--line2);
+  border-radius: var(--radius); margin-top: 10px; margin-bottom: 20px;
+}
+.progress-panel.visible { display: flex; }
+.progress-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--text3);
+}
+.progress-header-label { display: flex; align-items: center; gap: 8px; }
+.progress-summary { font-family: var(--font-mono); font-size: 11px; color: var(--text3); }
+/* overall bar */
+.progress-bar-wrap {
+  height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: var(--accent);
+  transition: width .3s ease;
+}
+/* per-board rows */
+.progress-boards { display: flex; flex-direction: column; gap: 6px; }
+.progress-board-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.progress-board-name {
+  font-family: var(--font-ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text3); width: 90px; flex-shrink: 0;
+}
+.progress-board-bar-wrap {
+  flex: 1; height: 3px; background: var(--bg3); border-radius: 2px; overflow: hidden;
+}
+.progress-board-bar-fill {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: var(--accent); opacity: .7;
+  transition: width .25s ease;
+}
+.progress-board-count {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text3);
+  width: 52px; text-align: right; flex-shrink: 0;
+}
+/* db write row */
+.progress-db-row {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-ui); font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--text3);
+  opacity: .4; transition: opacity .2s;
+}
+.progress-db-row.active { opacity: 1; color: var(--green); }
+.progress-db-row.done   { opacity: 1; color: var(--green); }
+.progress-db-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; flex-shrink: 0;
+}
+.progress-db-row.active .progress-db-dot { animation: pulse 1s ease-in-out infinite; }
+.progress-current {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text3);
+  min-height: 14px; letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.progress-current em { color: var(--accent); font-style: normal; }
 
 /* ── RESULTS BAR ─────────────────────────────────────────── */
 .results-bar {
@@ -672,6 +739,26 @@ footer {
     </div>
   </div>
 
+  <!-- PROGRESS PANEL -->
+  <div class="progress-panel" id="progress-panel">
+    <div class="progress-header">
+      <span class="progress-header-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Fetching jobs
+      </span>
+      <span class="progress-summary" id="progress-summary">0 / 0</span>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-bar-fill"></div>
+    </div>
+    <div class="progress-current" id="progress-current"></div>
+    <div class="progress-boards" id="progress-boards"></div>
+    <div class="progress-db-row" id="progress-db-row">
+      <span class="progress-db-dot"></span>
+      <span id="progress-db-label">Saving to database…</span>
+    </div>
+  </div>
+
   <!-- JOB LIST -->
   <div id="job-list" role="list"></div>
 
@@ -712,17 +799,7 @@ let currentPage  = 1;
 let perPage      = 20;
 
 // ── DEFAULT SOFTWARE FILTER ────────────────────────────────
-const SOFTWARE_TERMS = [
-  'software', 'engineer', 'developer', 'programmer', 'coder',
-  'mobile', 'ios', 'android', 'desktop',
-  'backend', 'back-end', 'back end',
-  'frontend', 'front-end', 'front end',
-  'fullstack', 'full-stack', 'full stack',
-  'devops', 'sre', 'platform',
-  'c++', 'java', 'swift', 'kotlin', 'go', 'golang',
-  'python', 'javascript', 'typescript', 'node',
-  'rust', 'scala', 'ruby', 'php', 'elixir',
-];
+const SOFTWARE_TERMS = ['developer', 'engineer', 'builder'];
 
 function isSoftwareJob(job) {
   const haystack = ((job.title ?? '') + ' ' + (job.description ?? '')).toLowerCase();
@@ -1169,6 +1246,132 @@ function scheduleFastPoll() {
   _statusTimer = setInterval(pollStatus, 3000);
 }
 
+// ── PROGRESS PANEL ───────────────────────────────────────────
+let _progressES = null;          // active EventSource
+let _boardTotals = {};           // { boardName: { done, jobs } }
+let _progressTotal = 0;
+
+function openProgressPanel(boards) {
+  const panel = document.getElementById('progress-panel');
+  const boardsEl = document.getElementById('progress-boards');
+  const dbRow = document.getElementById('progress-db-row');
+  panel.classList.add('visible');
+  dbRow.classList.remove('active', 'done');
+  document.getElementById('progress-db-label').textContent = 'Saving to database…';
+  document.getElementById('progress-bar-fill').style.width = '0%';
+  document.getElementById('progress-summary').textContent = '0 / ?';
+
+  _boardTotals = {};
+  boardsEl.innerHTML = boards.map(name => {
+    _boardTotals[name] = { done: 0, jobs: 0 };
+    return `
+      <div class="progress-board-row">
+        <span class="progress-board-name">${name}</span>
+        <div class="progress-board-bar-wrap">
+          <div class="progress-board-bar-fill" id="pb-bar-${name}"></div>
+        </div>
+        <span class="progress-board-count" id="pb-count-${name}">—</span>
+      </div>`;
+  }).join('');
+}
+
+function updateProgress(completed, total) {
+  const pct = total ? Math.round(completed / total * 100) : 0;
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+  document.getElementById('progress-summary').textContent = `${completed} / ${total} tasks`;
+}
+
+function updateBoardProgress(board, doneCount, jobCount, total) {
+  const perBoard = total / Object.keys(_boardTotals).length;
+  const pct = perBoard ? Math.round(doneCount / perBoard * 100) : 0;
+  const barEl   = document.getElementById(`pb-bar-${board}`);
+  const countEl = document.getElementById(`pb-count-${board}`);
+  if (barEl)   barEl.style.width = pct + '%';
+  if (countEl) countEl.textContent = `${jobCount} jobs`;
+}
+
+function closeProgressPanel(status) {
+  const dbRow = document.getElementById('progress-db-row');
+  const label = document.getElementById('progress-db-label');
+  if (status === 'done') {
+    dbRow.classList.remove('active');
+    dbRow.classList.add('done');
+  }
+  // Hide panel after a short delay so user can see "done" state
+  setTimeout(() => {
+    document.getElementById('progress-panel').classList.remove('visible');
+  }, 2500);
+}
+
+// Returns a Promise that resolves once SSE is connected and refresh is started.
+function connectProgressSSE() {
+  return new Promise((resolve, reject) => {
+    if (_progressES) { _progressES.close(); _progressES = null; }
+    // Show panel immediately
+    const knownBoards = ['LinkedIn', 'MichaelPage', 'CTgoodjobs'];
+    openProgressPanel(knownBoards);
+
+    _progressES = new EventSource('/progress');
+    _progressES.onerror = () => reject(new Error('SSE connection failed'));
+
+    _progressES.onmessage = e => {
+      const ev = JSON.parse(e.data);
+
+      // Server confirms connection is live — now safe to start refresh
+      if (ev.type === 'ready') { resolve(); return; }
+
+    if (ev.type === 'start') {
+      _progressTotal = ev.total;
+      // Re-init with actual board list from server
+      openProgressPanel(ev.boards);
+      updateProgress(0, ev.total);
+    } else if (ev.type === 'task_start') {
+      const cur = document.getElementById('progress-current');
+      if (cur) cur.innerHTML = `Searching <em>${ev.board}</em> · "${ev.keyword}"`;
+    } else if (ev.type === 'task_done' || ev.type === 'task_error') {
+      const b = _boardTotals[ev.board];
+      if (b) {
+        b.done++;
+        b.jobs += ev.count || 0;
+        updateBoardProgress(ev.board, b.done, b.jobs, _progressTotal);
+      }
+      updateProgress(ev.completed, ev.total);
+      // Show last completed task
+      const cur = document.getElementById('progress-current');
+      if (cur) {
+        const label = ev.type === 'task_done'
+          ? `✓ <em>${ev.board}</em> · "${ev.keyword}" — ${ev.count} jobs`
+          : `✗ <em>${ev.board}</em> · "${ev.keyword}" failed`;
+        cur.innerHTML = label;
+      }
+    } else if (ev.type === 'db_write') {
+      const cur = document.getElementById('progress-current');
+      if (cur) cur.innerHTML = '';
+      const dbRow = document.getElementById('progress-db-row');
+      const label = document.getElementById('progress-db-label');
+      dbRow.classList.add('active');
+      label.textContent = `Saving ${ev.count} jobs to database…`;
+      document.getElementById('progress-bar-fill').style.width = '95%';
+    } else if (ev.type === 'done') {
+      document.getElementById('progress-bar-fill').style.width = '100%';
+      document.getElementById('progress-db-label').textContent =
+        `✓ Saved — ${ev.total} jobs in database`;
+      closeProgressPanel('done');
+      _progressES.close(); _progressES = null;
+      setTimeout(() => loadJobs(), 500);
+    } else if (ev.type === 'cancelled') {
+      document.getElementById('progress-db-label').textContent = 'Stopped';
+      closeProgressPanel('cancelled');
+      _progressES.close(); _progressES = null;
+    } else if (ev.type === 'error') {
+      document.getElementById('progress-db-label').textContent = `Error: ${ev.error}`;
+      closeProgressPanel('error');
+      _progressES.close(); _progressES = null;
+    }
+    }; // end onmessage
+  }); // end Promise
+}
+
 async function handleRefetchClick() {
   if (_isRefreshing) {
     // ── Cancel running fetch ──────────────────────────────────
@@ -1184,16 +1387,23 @@ async function handleRefetchClick() {
     // ── Start fetch ───────────────────────────────────────────
     setRefreshState(true);
     try {
+      // Wait for SSE to confirm connection before starting refresh
+      // so we never miss the 'start' event.
+      await connectProgressSSE();
       const res  = await fetch('/refresh', { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
         scheduleFastPoll();
       } else {
+        if (_progressES) { _progressES.close(); _progressES = null; }
+        document.getElementById('progress-panel').classList.remove('visible');
         setRefreshState(false);
         const lbl = document.getElementById('last-fetch-label');
         if (lbl) lbl.textContent = data.error || 'Refresh failed';
       }
     } catch {
+      if (_progressES) { _progressES.close(); _progressES = null; }
+      document.getElementById('progress-panel').classList.remove('visible');
       setRefreshState(false);
       const lbl = document.getElementById('last-fetch-label');
       if (lbl) lbl.textContent = 'API server offline — start with: uvicorn server:app';
@@ -1218,7 +1428,7 @@ function startStatusPolling() {
 
 async function loadJobs() {
   try {
-    const res = await fetch('jobs.json');
+    const res = await fetch('/jobs');
     allJobs = await res.json();
   } catch {
     allJobs = [];
